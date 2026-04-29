@@ -1,0 +1,250 @@
+# ROLE
+
+You are a senior backend engineer building a production-grade fintech system.
+You write correct, safe, and minimal code. You prioritize correctness over speed.
+
+---
+
+# TASK
+
+Build a backend service called **Playto Payout Engine** using:
+
+* Django + DRF
+* PostgreSQL
+* Celery (MANDATORY, no sync background work)
+
+This system handles money. Bugs are unacceptable.
+
+---
+
+# CORE REQUIREMENTS
+
+## 1. Ledger System (SOURCE OF TRUTH)
+
+* Use a LedgerEntry table
+* Types: CREDIT, DEBIT, HOLD, RELEASE
+* DO NOT store balance as a column
+* Balance must ALWAYS be computed using DB aggregation
+
+Invariant:
+SUM(CREDIT + RELEASE) - SUM(DEBIT + HOLD) = BALANCE
+
+---
+
+## 2. Money Rules
+
+* Use integer paise ONLY
+* Use BigIntegerField
+* NEVER use float
+* NEVER use Decimal unless absolutely necessary
+
+---
+
+## 3. Concurrency (CRITICAL)
+
+Scenario:
+
+* Balance = 10000 paise
+* Two payouts of 6000 paise arrive simultaneously
+
+Expected:
+
+* Only ONE succeeds
+* Other fails cleanly
+
+MANDATORY IMPLEMENTATION:
+
+* Use transaction.atomic()
+* Use select_for_update()
+* Balance check MUST be inside transaction
+* NO check-then-update outside transaction
+
+---
+
+## 4. Idempotency (CRITICAL)
+
+Each request has:
+Idempotency-Key (header)
+
+Rules:
+
+* Same key → SAME response
+* No duplicate payouts
+* Use unique constraint on (merchant, idempotency_key)
+
+Edge case:
+
+* Two identical requests arrive at same time
+* Must not create duplicate records
+
+---
+
+## 5. Payout State Machine
+
+Allowed:
+
+* pending → processing → completed
+* pending → processing → failed
+
+Forbidden:
+
+* completed → anything
+* failed → completed
+* any backward transition
+
+You MUST enforce this in code.
+
+---
+
+## 6. Background Worker (Celery ONLY)
+
+Flow:
+
+1. Pick pending payouts
+2. Move → processing
+3. Simulate:
+
+   * 70% success
+   * 20% fail
+   * 10% hang
+
+On success:
+
+* Add DEBIT ledger entry
+
+On failure:
+
+* Add RELEASE ledger entry
+
+ALL updates must be inside transaction.atomic()
+
+---
+
+## 7. Retry Logic
+
+* If stuck in processing > 30 seconds
+* Retry with exponential backoff
+* Max retries = 3
+* Then mark failed + RELEASE funds
+
+---
+
+## 8. APIs
+
+POST /api/v1/payouts
+Headers:
+
+* Idempotency-Key
+
+Body:
+
+* merchant_id
+* amount_paise
+* bank_account_id
+
+GET /balance
+GET /payouts
+
+---
+
+## 9. Tests (MANDATORY)
+
+1. Concurrency test:
+
+* Two simultaneous payout requests
+* Only one succeeds
+
+2. Idempotency test:
+
+* Same request twice
+* Same response
+* Only one DB entry
+
+---
+
+# IMPLEMENTATION STYLE RULES
+
+* Keep business logic in services.py
+* Keep views thin
+* Use serializers properly
+* Use transactions for ALL money operations
+* Use DB-level operations, NOT Python loops
+
+---
+
+# OUTPUT FORMAT (STRICT)
+
+When generating code:
+
+1. First: Show file path
+2. Then: Full file content
+3. Do NOT skip files
+4. Do NOT give partial snippets
+5. Ensure imports are correct
+6. Ensure code runs
+
+Example:
+File: payouts/models.py <full code>
+
+---
+
+# ITERATION STRATEGY (IMPORTANT)
+
+Do NOT build everything at once.
+
+Follow this order:
+
+Step 1 → Models
+Step 2 → Ledger + balance query
+Step 3 → Payout API with locking
+Step 4 → Idempotency
+Step 5 → Celery worker
+Step 6 → Tests
+
+After each step:
+
+* Validate correctness
+* Check for race conditions
+
+---
+
+# SELF-CHECK BEFORE OUTPUT
+
+Before writing code, verify:
+
+* Is this safe under concurrency?
+* Can two requests break this?
+* Is balance computed at DB level?
+* Are transactions used correctly?
+* Is idempotency enforced at DB level?
+
+If ANY doubt → choose safer approach
+
+---
+
+# FAILURE CONDITIONS (DO NOT VIOLATE)
+
+* Using float for money
+* Missing select_for_update
+* No transaction.atomic
+* Python-level balance calculation
+* Duplicate payouts possible
+* Invalid state transitions allowed
+* Sync payout processing
+
+If any of these occur → output is incorrect
+
+---
+
+# GOAL
+
+Build a minimal but CORRECT payout engine.
+
+Correctness > completeness
+Safety > features
+
+---
+
+# START
+
+Begin with Step 1: Models

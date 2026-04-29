@@ -1,0 +1,7 @@
+Django>=4.2
+djangorestframework
+psycopg2-binary
+celery
+redis
+python-dotenv
+dj-database-url
